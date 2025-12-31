@@ -16,7 +16,8 @@ def init_database():
             session_id TEXT NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
-            token_count INTEGER,
+            input_tokens INTEGER DEFAULT 0,
+            output_tokens INTEGER DEFAULT 0,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -48,21 +49,34 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def store_message(session_id: str, role: str, content: str):
-    """Store a message in database"""
+# def store_message(session_id: str, role: str, content: str):
+#     """Store a message in database"""
+#     conn = sqlite3.connect(DB_NAME, timeout=30.0)
+#     cursor = conn.cursor()
+    
+#     token_count = estimate_tokens(content)
+    
+#     cursor.execute('''
+#         INSERT INTO messages (session_id, role, content, token_count)
+#         VALUES (?, ?, ?, ?)
+#     ''', (session_id, role, content, token_count))
+    
+#     conn.commit()
+#     conn.close()
+
+def store_message_with_usage(session_id: str, role: str, content: str, 
+                             input_tokens: int = 0, output_tokens: int = 0):
+    """Store message with actual token usage from API"""
     conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     
-    token_count = estimate_tokens(content)
-    
     cursor.execute('''
-        INSERT INTO messages (session_id, role, content, token_count)
-        VALUES (?, ?, ?, ?)
-    ''', (session_id, role, content, token_count))
+        INSERT INTO messages (session_id, role, content, input_tokens, output_tokens)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (session_id, role, content, input_tokens, output_tokens))
     
     conn.commit()
     conn.close()
-
 
 def count_messages(session_id: str) -> int:
     """Count total messages for a session"""
@@ -182,34 +196,39 @@ def cache_summary(session_id: str, messages_covered: int, summary: str):
 
 
 def get_session_stats(session_id: str) -> Dict:
-    """Get statistics for a session"""
+    """Get statistics with accurate costs"""
     conn = sqlite3.connect(DB_NAME, timeout=30.0)
     cursor = conn.cursor()
     
     # Total messages
-    cursor.execute('''
-        SELECT COUNT(*) FROM messages WHERE session_id = ?
-    ''', (session_id,))
+    cursor.execute('SELECT COUNT(*) FROM messages WHERE session_id = ?', (session_id,))
     total_messages = cursor.fetchone()[0]
     
     # Cached summaries
-    cursor.execute('''
-        SELECT COUNT(*) FROM summaries WHERE session_id = ?
-    ''', (session_id,))
+    cursor.execute('SELECT COUNT(*) FROM summaries WHERE session_id = ?', (session_id,))
     summary_count = cursor.fetchone()[0]
     
-    # Total tokens
+    # Actual token usage
     cursor.execute('''
-        SELECT SUM(token_count) FROM messages WHERE session_id = ?
+        SELECT 
+            SUM(input_tokens) as total_input,
+            SUM(output_tokens) as total_output
+        FROM messages 
+        WHERE session_id = ?
     ''', (session_id,))
-    total_tokens = cursor.fetchone()[0] or 0
+    
+    result = cursor.fetchone()
+    total_input = result[0] or 0
+    total_output = result[1] or 0
     
     conn.close()
     
     return {
         "total_messages": total_messages,
         "cached_summaries": summary_count,
-        "total_tokens": total_tokens
+        "input_tokens": total_input,      # ← Separate counts
+        "output_tokens": total_output,
+        "total_tokens": total_input + total_output
     }
 
 

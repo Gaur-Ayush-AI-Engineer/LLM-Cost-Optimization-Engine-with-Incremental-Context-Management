@@ -202,171 +202,171 @@
     <button class="close-modal" onclick="closeStatsModal()">Close</button>
   </div>
 
-<script>
-// Session management
-let currentSession = localStorage.getItem('story_session_id') || generateSessionId();
-localStorage.setItem('story_session_id', currentSession);
-document.getElementById('sessionId').textContent = currentSession.slice(0, 8) + '...';
-
-function generateSessionId() {
-  return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-}
-
-// API call
-async function callChat(prompt) {
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      prompt: prompt,
-      session_id: currentSession
-      // model and max_tokens will use defaults from backend
-    })
-  });
-  
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`HTTP ${res.status}: ${errorText}`);
-  }
-  
-  const text = await res.text();
-  
-  try {
-    const data = JSON.parse(text);
-    // Extract content from response
-    let content = null;
-    if (data?.choices?.[0]?.message?.content) {
-      content = data.choices[0].message.content;
-    } else if (data?.choices?.[0]?.text) {
-      content = data.choices[0].text;
-    } else {
-      content = JSON.stringify(data, null, 2);
-    }
-    return content;
-  } catch(e) {
-    return text;
-  }
-}
-
-// Get session stats
-async function getStats() {
-  try {
-    const res = await fetch(`/api/stats/${currentSession}`);
-    if (!res.ok) throw new Error('Failed to fetch stats');
-    return await res.json();
-  } catch(err) {
-    console.error('Stats error:', err);
-    return null;
-  }
-}
-
-// Show stats modal
-async function showStats() {
-  const stats = await getStats();
-  if (!stats) {
-    alert('Failed to load statistics');
-    return;
-  }
-  
-  const content = `
-    <div class="stats-row">
-      <strong>Session ID:</strong>
-      <span>${currentSession}</span>
-    </div>
-    <div class="stats-row">
-      <strong>Total Messages:</strong>
-      <span>${stats.total_messages}</span>
-    </div>
-    <div class="stats-row">
-      <strong>Cached Summaries:</strong>
-      <span>${stats.cached_summaries}</span>
-    </div>
-    <div class="stats-row">
-      <strong>Total Tokens:</strong>
-      <span>${stats.total_tokens.toLocaleString()}</span>
-    </div>
-    <div class="stats-row">
-      <strong>Estimated Cost:</strong>
-      <span>${stats.estimated_cost}</span>
-    </div>
-  `;
-  
-  document.getElementById('statsContent').innerHTML = content;
-  document.getElementById('overlay').classList.remove('hidden');
-  document.getElementById('statsModal').classList.remove('hidden');
-}
-
-function closeStatsModal() {
-  document.getElementById('overlay').classList.add('hidden');
-  document.getElementById('statsModal').classList.add('hidden');
-}
-
-// Start new session
-function startNewSession() {
-  if (!confirm('Start a new story? This will create a fresh session.')) {
-    return;
-  }
-  
-  currentSession = generateSessionId();
-  localStorage.setItem('story_session_id', currentSession);
-  document.getElementById('sessionId').textContent = currentSession.slice(0, 8) + '...';
-  document.getElementById('prompt').value = '';
-  document.getElementById('out').textContent = 'New session started! Type your first prompt...';
-  document.getElementById('out').classList.remove('error');
-}
-
-// Send button handler
-document.getElementById('send').onclick = async () => {
-  const prompt = document.getElementById('prompt').value.trim();
-  if (!prompt) {
-    alert('Please enter a prompt');
-    return;
-  }
-  
-  const out = document.getElementById('out');
-  const sendBtn = document.getElementById('send');
-  
-  out.textContent = 'Generating story...';
-  out.className = 'loading';
-  sendBtn.disabled = true;
-  
-  try {
-    const reply = await callChat(prompt);
-    out.textContent = reply;
-    out.className = '';
+  <script>
+    // Session management
+    let currentSession = localStorage.getItem('story_session_id') || generateSessionId();
+    localStorage.setItem('story_session_id', currentSession);
+    document.getElementById('sessionId').textContent = currentSession.slice(0, 8) + '...';
     
-    // Clear prompt after successful send
-    document.getElementById('prompt').value = '';
-  } catch (err) {
-    out.textContent = 'Error: ' + (err.message || String(err));
-    out.className = 'error';
-  } finally {
-    sendBtn.disabled = false;
-  }
-};
-
-// Clear button handler
-document.getElementById('clear').onclick = () => {
-  document.getElementById('prompt').value = '';
-  document.getElementById('out').textContent = 'Response will appear here...';
-  document.getElementById('out').className = '';
-};
-
-// Stats button handler
-document.getElementById('stats').onclick = showStats;
-
-// New session button handler
-document.getElementById('newSession').onclick = startNewSession;
-
-// Close modal when clicking overlay
-document.getElementById('overlay').onclick = closeStatsModal;
-
-// Enter key to send (Ctrl+Enter or Cmd+Enter)
-document.getElementById('prompt').addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    document.getElementById('send').click();
-  }
-});
-</script>
+    function generateSessionId() {
+      return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+    
+    // Non-streaming API call (UPDATED)
+    async function callChat(prompt) {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          prompt: prompt,
+          session_id: currentSession
+        })
+      });
+      
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText}`);
+      }
+      
+      const data = await res.json();
+      
+      // Extract content
+      if (data?.choices?.[0]?.message?.content) {
+        return data.choices[0].message.content;
+      } else if (data?.choices?.[0]?.text) {
+        return data.choices[0].text;
+      } else {
+        return JSON.stringify(data, null, 2);
+      }
+    }
+    
+    // Send button handler (UPDATED for non-streaming)
+    document.getElementById('send').onclick = async () => {
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt) {
+        alert('Please enter a prompt');
+        return;
+      }
+      
+      const out = document.getElementById('out');
+      const sendBtn = document.getElementById('send');
+      
+      out.textContent = 'Generating story...';
+      out.className = 'loading';
+      sendBtn.disabled = true;
+      
+      try {
+        const reply = await callChat(prompt);
+        out.textContent = reply;
+        out.className = '';
+        
+        // Clear prompt after successful send
+        document.getElementById('prompt').value = '';
+      } catch (err) {
+        out.textContent = 'Error: ' + (err.message || String(err));
+        out.className = 'error';
+      } finally {
+        sendBtn.disabled = false;
+      }
+    };
+    
+    // Get session stats
+    async function getStats() {
+      try {
+        const res = await fetch(`/api/stats/${currentSession}`);
+        if (!res.ok) throw new Error('Failed to fetch stats');
+        return await res.json();
+      } catch(err) {
+        console.error('Stats error:', err);
+        return null;
+      }
+    }
+    
+    // Show stats modal (UPDATED to show input/output costs)
+    async function showStats() {
+      const stats = await getStats();
+      if (!stats) {
+        alert('Failed to load statistics');
+        return;
+      }
+      
+      const content = `
+        <div class="stats-row">
+          <strong>Session ID:</strong>
+          <span>${currentSession}</span>
+        </div>
+        <div class="stats-row">
+          <strong>Total Messages:</strong>
+          <span>${stats.total_messages}</span>
+        </div>
+        <div class="stats-row">
+          <strong>Cached Summaries:</strong>
+          <span>${stats.cached_summaries}</span>
+        </div>
+        <div class="stats-row">
+          <strong>Input Tokens:</strong>
+          <span>${stats.input_tokens ? stats.input_tokens.toLocaleString() : '0'}</span>
+        </div>
+        <div class="stats-row">
+          <strong>Output Tokens:</strong>
+          <span>${stats.output_tokens ? stats.output_tokens.toLocaleString() : '0'}</span>
+        </div>
+        <div class="stats-row">
+          <strong>Total Tokens:</strong>
+          <span>${stats.total_tokens.toLocaleString()}</span>
+        </div>
+        <div class="stats-row">
+          <strong>Input Cost:</strong>
+          <span>${stats.costs ? stats.costs.input : '$0.000000'}</span>
+        </div>
+        <div class="stats-row">
+          <strong>Output Cost:</strong>
+          <span>${stats.costs ? stats.costs.output : '$0.000000'}</span>
+        </div>
+        <div class="stats-row" style="border-top: 2px solid #333; font-weight: bold;">
+          <strong>Total Cost:</strong>
+          <span>${stats.costs ? stats.costs.total : stats.estimated_cost}</span>
+        </div>
+      `;
+      
+      document.getElementById('statsContent').innerHTML = content;
+      document.getElementById('overlay').classList.remove('hidden');
+      document.getElementById('statsModal').classList.remove('hidden');
+    }
+    
+    function closeStatsModal() {
+      document.getElementById('overlay').classList.add('hidden');
+      document.getElementById('statsModal').classList.add('hidden');
+    }
+    
+    function startNewSession() {
+      if (!confirm('Start a new story? This will create a fresh session.')) {
+        return;
+      }
+      
+      currentSession = generateSessionId();
+      localStorage.setItem('story_session_id', currentSession);
+      document.getElementById('sessionId').textContent = currentSession.slice(0, 8) + '...';
+      document.getElementById('prompt').value = '';
+      document.getElementById('out').textContent = 'New session started! Type your first prompt...';
+      document.getElementById('out').classList.remove('error');
+    }
+    
+    document.getElementById('clear').onclick = () => {
+      document.getElementById('prompt').value = '';
+      document.getElementById('out').textContent = 'Response will appear here...';
+      document.getElementById('out').className = '';
+    };
+    
+    document.getElementById('stats').onclick = showStats;
+    document.getElementById('newSession').onclick = startNewSession;
+    document.getElementById('overlay').onclick = closeStatsModal;
+    
+    document.getElementById('prompt').addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        document.getElementById('send').click();
+      }
+    });
+  </script>
 </body>
 </html>

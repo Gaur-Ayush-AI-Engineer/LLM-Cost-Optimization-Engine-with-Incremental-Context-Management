@@ -1,10 +1,11 @@
 import time
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
+import json
 
 from config import MODEL_CONFIG, MIN_REQUEST_INTERVAL
-from database import init_database, store_message, get_session_stats, delete_session, count_messages, get_cached_summary
+from database import init_database, store_message_with_usage, get_session_stats, delete_session, count_messages, get_cached_summary,estimate_tokens
 from context import build_context, generate_summary_incremental
 from llm_utils import call_llm
 
@@ -50,7 +51,7 @@ def chat(body: PromptIn):
     print(f"💬 User prompt: {body.prompt[:100]}...")
     
     # Store user message
-    store_message(body.session_id, "user", body.prompt)
+    store_message_with_usage(body.session_id, "user", body.prompt, input_tokens=0, output_tokens=0)
     
     # Build context
     context = build_context(body.session_id, body.prompt)
@@ -62,12 +63,25 @@ def chat(body: PromptIn):
         print(f"🚀 Sending request to {body.model}...")
         
         # Call LLM
-        assistant_response = call_llm(context, max_tokens=body.max_tokens)
+        assistant_response,usage = call_llm(context, max_tokens=body.max_tokens)
         
         last_request_time = time.time()
+
+        # Extract actual token counts
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
         
-        # Store AI response (FULL, no compression)
-        store_message(body.session_id, "assistant", assistant_response)
+        print(f"📊 Tokens - Input: {prompt_tokens}, Output: {completion_tokens}, Total: {total_tokens}")
+        
+        # Store AI response with ACTUAL token count
+        store_message_with_usage(
+            body.session_id, 
+            "assistant", 
+            assistant_response,
+            input_tokens=prompt_tokens,      # ← Real numbers!
+            output_tokens=completion_tokens
+        )
         
         print(f"✅ Response generated: {len(assistant_response)} chars")
         print(f"{'='*60}\n")
@@ -80,7 +94,8 @@ def chat(body: PromptIn):
                         "content": assistant_response
                     }
                 }
-            ]
+            ],
+            "usage": usage  # ← Include usage in response
         }
         
     except Exception as e:
@@ -125,11 +140,20 @@ def get_summary_endpoint(session_id: str):
 def get_stats(session_id: str):
     """Get statistics for a session"""
     stats = get_session_stats(session_id)
+
+    # Calculate REAL costs
+    input_cost = (stats['input_tokens'] / 1_000_000) * MODEL_CONFIG['input_cost_per_1m']
+    output_cost = (stats['output_tokens'] / 1_000_000) * MODEL_CONFIG['output_cost_per_1m']
+    total_cost = input_cost + output_cost
     
     return {
         "session_id": session_id,
         **stats,
-        "estimated_cost": f"${(stats['total_tokens'] / 1_000_000) * MODEL_CONFIG['input_cost_per_1m']:.4f}"
+        "costs": {
+            "input": f"${input_cost:.6f}",
+            "output": f"${output_cost:.6f}",
+            "total": f"${total_cost:.6f}"
+        }
     }
 
 
@@ -139,6 +163,87 @@ def delete_session_endpoint(session_id: str):
     deleted = delete_session(session_id)
     
     return {"session_id": session_id, "deleted_messages": deleted}
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(body: PromptIn):
+    """Streaming chat endpoint"""
+    global last_request_time
+    
+    # Rate limiting
+    current_time = time.time()
+    time_since_last = current_time - last_request_time
+    
+    if time_since_last < MIN_REQUEST_INTERVAL:
+        wait_time = MIN_REQUEST_INTERVAL - time_since_last
+        raise HTTPException(
+            status_code=429, 
+            detail=f"Please wait {wait_time:.1f} seconds"
+        )
+    
+    print(f"\n{'='*60}")
+    print(f"📨 Streaming request from session: {body.session_id}")
+    print(f"💬 User prompt: {body.prompt[:100]}...")
+    
+    # Store user message
+    store_message_with_usage(body.session_id, "user", body.prompt, input_tokens=0, output_tokens=0)
+    
+    # Build context
+    context = build_context(body.session_id, body.prompt)
+    context.append({"role": "user", "content": body.prompt})
+    
+    # Generator function for streaming
+    async def generate():
+        from llm_utils import call_llm_stream
+        
+        full_response = ""
+        total_input_tokens = 0
+        total_output_tokens = 0
+        
+        try:
+            print(f"🚀 Starting stream to {body.model}...")
+            last_request_time = time.time()
+            
+            # Stream chunks
+            for chunk in call_llm_stream(context, max_tokens=body.max_tokens):
+                full_response += chunk
+                yield f"data: {json.dumps({'content': chunk})}\n\n"
+            
+            # After streaming completes, call once more to get usage stats
+            # (OpenRouter doesn't provide usage in streaming mode, so we estimate)
+
+            # Estimate input tokens from context
+            total_input_tokens = sum(estimate_tokens(msg['content']) for msg in context)
+
+            # Estimate output tokens from response
+            total_output_tokens = estimate_tokens(full_response)
+            
+            # Signal completion with token info
+            yield "data: " + json.dumps({
+                    'done': True,
+                    'usage': {
+                        'prompt_tokens': total_input_tokens,
+                        'completion_tokens': total_output_tokens
+                    }
+            }) + "\n\n"
+            
+            # Store with token usage
+            store_message_with_usage(
+                body.session_id, 
+                "assistant", 
+                full_response,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens
+            )
+            
+            print(f"✅ Stream complete: {len(full_response)} chars")
+            print(f"📊 Tokens - Input: {total_input_tokens}, Output: {total_output_tokens}")
+            
+        except Exception as e:
+            print(f"❌ Streaming error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":
