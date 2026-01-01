@@ -28,6 +28,51 @@
       color: #666;
     }
     
+    .session-selector {
+      margin-bottom: 16px;
+      padding: 12px;
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+    }
+    
+    .session-selector select {
+      width: 100%;
+      padding: 8px;
+      font-size: 14px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      background: white;
+    }
+    
+    .session-selector select:focus {
+      outline: none;
+      border-color: #4a90e2;
+    }
+    
+    .session-selector label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 500;
+      font-size: 13px;
+      color: #666;
+    }
+    
+    .refresh-sessions {
+      margin-left: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      background: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    
+    .refresh-sessions:hover {
+      background: #5a6268;
+    }
+    
     textarea {
       width: 100%;
       box-sizing: border-box;
@@ -183,6 +228,17 @@
     <div class="session-info" id="sessionInfo">Session: <span id="sessionId">loading...</span></div>
   </div>
   
+  <!-- Session Selector -->
+  <div class="session-selector">
+    <label>📚 Your Stories:</label>
+    <div style="display: flex; gap: 8px;">
+      <select id="sessionSelect">
+        <option value="">Loading stories...</option>
+      </select>
+      <button class="refresh-sessions" onclick="loadSessionList()">🔄</button>
+    </div>
+  </div>
+  
   <textarea id="prompt" rows="5" placeholder="Type your story prompt or continue the story..."></textarea>
   
   <div class="button-group">
@@ -212,7 +268,7 @@
       return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
     
-    // Non-streaming API call (UPDATED)
+    // Non-streaming API call
     async function callChat(prompt) {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -240,7 +296,7 @@
       }
     }
     
-    // Send button handler (UPDATED for non-streaming)
+    // Send button handler
     document.getElementById('send').onclick = async () => {
       const prompt = document.getElementById('prompt').value.trim();
       if (!prompt) {
@@ -282,7 +338,7 @@
       }
     }
     
-    // Show stats modal (UPDATED to show input/output costs)
+    // Show stats modal
     async function showStats() {
       const stats = await getStats();
       if (!stats) {
@@ -350,23 +406,92 @@
       document.getElementById('prompt').value = '';
       document.getElementById('out').textContent = 'New session started! Type your first prompt...';
       document.getElementById('out').classList.remove('error');
+      
+      // Reload session list to show new session
+      loadSessionList();
     }
     
+    // Load list of all sessions
+    async function loadSessionList() {
+      try {
+        const res = await fetch('/api/sessions');
+        const data = await res.json();
+        
+        const select = document.getElementById('sessionSelect');
+        select.innerHTML = '';
+        
+        // Add current session first
+        const currentOption = document.createElement('option');
+        currentOption.value = currentSession;
+        currentOption.textContent = `📝 Current Story (${currentSession.slice(0, 8)}...)`;
+        currentOption.selected = true;
+        select.appendChild(currentOption);
+        
+        // Add other sessions
+        data.sessions.forEach(session => {
+          if (session.session_id !== currentSession) {
+            const option = document.createElement('option');
+            option.value = session.session_id;
+            
+            // Format last activity date
+            const date = new Date(session.last_activity);
+            const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+            
+            option.textContent = `📖 Story (${session.message_count} msgs) - ${dateStr}`;
+            select.appendChild(option);
+          }
+        });
+        
+        console.log(`Loaded ${data.sessions.length} stories`);
+      } catch (err) {
+        console.error('Failed to load sessions:', err);
+      }
+    }
+    
+    // Switch to selected session
+    function switchSession() {
+      const select = document.getElementById('sessionSelect');
+      const selectedSession = select.value;
+      
+      if (!selectedSession || selectedSession === currentSession) {
+        return;
+      }
+      
+      if (confirm(`Switch to this story? (${selectedSession.slice(0, 12)}...)`)) {
+        currentSession = selectedSession;
+        localStorage.setItem('story_session_id', currentSession);
+        document.getElementById('sessionId').textContent = currentSession.slice(0, 8) + '...';
+        document.getElementById('prompt').value = '';
+        document.getElementById('out').textContent = 'Story loaded! Continue where you left off...';
+        document.getElementById('out').classList.remove('error');
+        
+        // Reload the session list to update "Current Story"
+        loadSessionList();
+      }
+    }
+    
+    // Clear button
     document.getElementById('clear').onclick = () => {
       document.getElementById('prompt').value = '';
       document.getElementById('out').textContent = 'Response will appear here...';
       document.getElementById('out').className = '';
     };
     
+    // Event listeners
     document.getElementById('stats').onclick = showStats;
     document.getElementById('newSession').onclick = startNewSession;
     document.getElementById('overlay').onclick = closeStatsModal;
+    document.getElementById('sessionSelect').addEventListener('change', switchSession);
     
+    // Keyboard shortcut: Ctrl+Enter or Cmd+Enter to send
     document.getElementById('prompt').addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         document.getElementById('send').click();
       }
     });
+    
+    // Load sessions on page load
+    loadSessionList();
   </script>
 </body>
 </html>

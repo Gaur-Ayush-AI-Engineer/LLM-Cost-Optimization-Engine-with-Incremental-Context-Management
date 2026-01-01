@@ -48,22 +48,6 @@ def estimate_tokens(text: str) -> int:
     """Estimate token count (roughly 4 chars per token)"""
     return len(text) // 4
 
-
-# def store_message(session_id: str, role: str, content: str):
-#     """Store a message in database"""
-#     conn = sqlite3.connect(DB_NAME, timeout=30.0)
-#     cursor = conn.cursor()
-    
-#     token_count = estimate_tokens(content)
-    
-#     cursor.execute('''
-#         INSERT INTO messages (session_id, role, content, token_count)
-#         VALUES (?, ?, ?, ?)
-#     ''', (session_id, role, content, token_count))
-    
-#     conn.commit()
-#     conn.close()
-
 def store_message_with_usage(session_id: str, role: str, content: str, 
                              input_tokens: int = 0, output_tokens: int = 0):
     """Store message with actual token usage from API"""
@@ -246,3 +230,29 @@ def delete_session(session_id: str) -> int:
     conn.close()
     
     return messages_deleted
+
+def get_all_sessions() -> List[Dict]:
+    """Get all unique sessions with their message counts and last activity"""
+    conn = sqlite3.connect(DB_NAME, timeout=30.0)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT 
+            session_id,
+            COUNT(*) as message_count,
+            MAX(timestamp) as last_activity
+        FROM messages
+        GROUP BY session_id
+        ORDER BY last_activity DESC
+    ''')
+    
+    sessions = []
+    for row in cursor.fetchall():
+        sessions.append({
+            "session_id": row[0],
+            "message_count": row[1],
+            "last_activity": row[2]
+        })
+    
+    conn.close()
+    return sessions

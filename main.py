@@ -3,9 +3,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import json
-
+import uvicorn
 from config import MODEL_CONFIG, MIN_REQUEST_INTERVAL
-from database import init_database, store_message_with_usage, get_session_stats, delete_session, count_messages, get_cached_summary,estimate_tokens
+from database import init_database, store_message_with_usage, get_session_stats, delete_session, count_messages, get_cached_summary,estimate_tokens,get_all_sessions
 from context import build_context, generate_summary_incremental
 from llm_utils import call_llm
 
@@ -13,14 +13,14 @@ app = FastAPI()
 
 # Rate limiting
 last_request_time = 0
-
+#uvicorn port
+port = 9000
 # Initialize database on startup
 init_database()
 
 
 @app.get("/")
 def root():
-    # return {"message": "Story API is running", "model": MODEL_CONFIG["name"]}
     return FileResponse("index.html")
 
 
@@ -245,9 +245,12 @@ async def chat_stream(body: PromptIn):
     
     return StreamingResponse(generate(), media_type="text/event-stream")
 
+@app.get("/api/sessions")
+def get_sessions():
+    """Get all saved story sessions"""
+    sessions = get_all_sessions()
+    return {"sessions": sessions, "total": len(sessions)}
 
 if __name__ == "__main__":
-    import uvicorn
-    port = 9000
     print(f"🚀 Starting server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
