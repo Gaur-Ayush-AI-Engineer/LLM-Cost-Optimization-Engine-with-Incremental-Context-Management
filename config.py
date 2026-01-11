@@ -21,9 +21,9 @@ MODEL_CONFIG = {
 # Strategy Settings
 RECENT_MESSAGE_COUNT = 15           # Keep last 10 messages in full
 SUMMARIZE_THRESHOLD = 15            # Start summarizing after 10 messages
-SUMMARY_MAX_TOKENS = 2000           # Max tokens for summary
+SUMMARY_MAX_TOKENS = 2500           # Max tokens for summary
 MESSAGE_COMPRESS_THRESHOLD = 2500   # Compress messages longer than this
-MESSAGE_COMPRESSED_SIZE = 800       # Compress to this size
+MESSAGE_COMPRESSED_SIZE = 2500       # Compress to this size
 TARGET_INPUT_TOKENS = 20000         # Target input size
 MAX_INPUT_TOKENS = 50000            # Safety limit
 
